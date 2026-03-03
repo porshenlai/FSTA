@@ -1,0 +1,13 @@
+[Unit]
+Description=FS Worker Instance %i
+After=network.target
+
+[Service]
+WorkingDirectory=/path/to/your/project
+# 使用虛擬環境路徑
+ExecStart=/path/to/your/project/venv/bin/python3 /path/to/your/project/fs-server/worker_app.py
+Restart=always
+User=your_username
+
+[Install]
+WantedBy=multi-user.target

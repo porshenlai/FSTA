@@ -4,8 +4,10 @@ import os
 import sqlite3
 import json
 from datetime import datetime
+#pip install aiohttp aiofiles psutil
 from aiohttp import web
 import aiofiles
+import psutil
 
 # 1. 建立一個異步 Web 伺服器運行在 8081 埠。
 # 2. 實作 GET /data?symbol_year 路由處理快取讀取。
@@ -26,8 +28,6 @@ import aiofiles
 
 class HubServer:
 	def __init__(self):
-		# 需從設定或環境變數取得 Worker 的 PID
-		self.worker_pid = int(os.environ.get("WORKER_PID", 0))
 		# 資料庫根目錄
 		self.db_root = "db/"
 		self.doc_root = "docs/"
@@ -65,6 +65,34 @@ class HubServer:
 				)
 			""")
 			conn.commit()
+
+	def get_all_worker_pids(script_name="worker_app.py"):
+		pids = []
+		for proc in psutil.process_iter(['pid', 'cmdline']):
+			try:
+				# 檢查命令列中是否包含目標腳本名稱
+				cmdline = proc.info.get('cmdline')
+				if cmdline and any(script_name in s for s in cmdline):
+					if proc.info['pid'] != os.getpid(): # 排除 Hub 自身
+						pids.append(proc.info['pid'])
+			except (psutil.NoSuchProcess, psutil.AccessDenied):
+				continue
+		return pids
+
+	def notify_workers():
+		worker_pids = get_all_worker_pids()
+	
+		if not worker_pids:
+			print("沒有偵測到任何運作中的 Worker。")
+			return
+
+		print(f"偵測到 {len(worker_pids)} 個 Worker 實例: {worker_pids}")
+	
+		for pid in worker_pids:
+			# try:
+			#	os.kill(pid, signal.SIGUSR1)
+			# except ProcessLookupError:
+			#	print(f"PID {pid} 已消失")
 
 	async def db2json(self, db_name, json_path=None):
 		""" 將 db 儲存的年度資料表格轉換成 JSON 檔案，並回傳 List """
@@ -114,16 +142,7 @@ class HubServer:
 			cursor.execute("INSERT INTO tasks (symbol, year, begin, status) VALUES (?, ?, ?, 'Pending')", 
 						   (symbol, year, begin))
 			conn.commit()
-
-		# 向 Worker 發送 SIGUSR1 信號
-		if self.worker_pid:
-			try:
-				os.kill(self.worker_pid, signal.SIGUSR1)
-				print(f"發送 SIGUSR1 至 Worker (PID: {self.worker_pid})")
-			except ProcessLookupError:
-				print(f"錯誤: 找不到 PID {self.worker_pid} 的行程")
-		else:
-			print("警告: 尚未偵測到運行的 Worker PID")
+		notify_workers()
 		return True
 
 	async def prepare_data(self, symbol, year):

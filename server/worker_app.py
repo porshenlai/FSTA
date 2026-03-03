@@ -4,6 +4,7 @@ import sys
 import os
 import json
 import aiohttp
+#pip install pyfinance
 
 # 1. 監聽 SIGUSR1 信號。
 # 2. 接收信號後，透過 API 向 Hub 索取任務。
