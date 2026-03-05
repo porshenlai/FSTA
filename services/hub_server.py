@@ -28,6 +28,7 @@ import psutil
 
 class HubServer:
 	def __init__(self):
+		# {{{
 		# 資料庫根目錄
 		self.db_root = "db/"
 		self.doc_root = "docs/"
@@ -42,9 +43,11 @@ class HubServer:
 		self.db_caches = {} 
 		
 		self._init_db()
+		# }}}
 
 	def _init_db(self):
 		"""初始化 SQLite 資料庫結構"""
+		# {{{
 		if not os.path.exists(self.db_root):
 			os.makedirs(self.db_root)
 
@@ -52,21 +55,23 @@ class HubServer:
 			# 任務追蹤表
 			# symbol: 目標 ID
 			# year: 資料年度
-			# start: 從該年度第幾天開始取得資料
-			# status: 擷取狀態
+			# tid: 資料型態
+			# status: 擷取狀態 Pending > Running > 1 > 2 > 3 ... > Failed
 			conn.execute("""
 				CREATE TABLE IF NOT EXISTS tasks (
 					task_id INTEGER PRIMARY KEY AUTOINCREMENT,
 					symbol TEXT,
 					year INTEGER,
-					begin INTEGER,
+					tid INTEGER,
 					status TEXT,
 					created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 				)
 			""")
 			conn.commit()
+		# }}}
 
 	def get_all_worker_pids(script_name="worker_app.py"):
+		# {{{
 		pids = []
 		for proc in psutil.process_iter(['pid', 'cmdline']):
 			try:
@@ -77,9 +82,11 @@ class HubServer:
 						pids.append(proc.info['pid'])
 			except (psutil.NoSuchProcess, psutil.AccessDenied):
 				continue
+		# }}}
 		return pids
 
 	def notify_workers():
+		# {{{
 		worker_pids = get_all_worker_pids()
 	
 		if not worker_pids:
@@ -89,13 +96,15 @@ class HubServer:
 		print(f"偵測到 {len(worker_pids)} 個 Worker 實例: {worker_pids}")
 	
 		for pid in worker_pids:
-			# try:
-			#	os.kill(pid, signal.SIGUSR1)
-			# except ProcessLookupError:
-			#	print(f"PID {pid} 已消失")
+			try:
+				os.kill(pid, signal.SIGUSR1)
+			except ProcessLookupError:
+				print(f"PID {pid} 已消失")
+		# }}}
 
 	async def db2json(self, db_name, json_path=None):
 		""" 將 db 儲存的年度資料表格轉換成 JSON 檔案，並回傳 List """
+		# {{{
 		db_path = os.path.join(self.db_root, db_name)
 
 		# 簡單起見，這裡直接開關連線，若要高效能可整合進 self.db_caches
@@ -128,25 +137,28 @@ class HubServer:
 			if os.path.exists(db_path):
 				os.remove(db_path)
 
+		# }}}
 		return data_list
 
-	async def schedule_task(self, symbol, year, begin):
+	async def schedule_task(self, symbol, year, tid):
 		"""設定 Syncer 資料並觸發之"""
+		# {{{
 		with sqlite3.connect(self.syncer_db) as conn:
 			cursor = conn.cursor()
 			# 檢查是否已有相同任務在進行或待命
-			cursor.execute("SELECT task_id FROM tasks WHERE symbol=? AND year=? AND (status='Pending' OR status='Running')", (symbol, year))
+			cursor.execute("SELECT task_id FROM tasks WHERE symbol=? AND year=? AND tid=?", (symbol, year, tid))
 			if cursor.fetchone():
 				return False
 
-			cursor.execute("INSERT INTO tasks (symbol, year, begin, status) VALUES (?, ?, ?, 'Pending')", 
-						   (symbol, year, begin))
+			cursor.execute("INSERT INTO tasks (symbol, year, tid, status) VALUES (?, ?, ?, 'Pending')", (symbol, year, tid))
 			conn.commit()
 		notify_workers()
+		# }}}
 		return True
 
 	async def prepare_data(self, symbol, year):
 		"""準備要回應請求的資料"""
+		# {{{
 		this_year = datetime.now().year
 		json_file = f"{symbol}_{year}.json"
 		db_file = f"{symbol}_{year}.db"
@@ -168,19 +180,18 @@ class HubServer:
 			# 當年度處理
 			max_date = 0
 			if os.path.exists(db_path):
-				with sqlite3.connect(db_path) as conn:
-					res = conn.execute("SELECT MAX(D) FROM price_data").fetchone()
-					max_date = res[0] if res and res[0] is not None else 0
-
+				max_date = datetime.fromtimestamp(os.path.getmtime(db_path)).timetuple().tm_yday
 			today_day_of_year = datetime.now().timetuple().tm_yday
 			if os.path.exists(db_path) and max_date >= today_day_of_year - 1:
 				return await self.db2json(db_file) # 不轉 json 檔，因為還會更新
 
 			await self.schedule_task(symbol, year, max_date)
 			return "Pending"
+		# }}}
 
 	async def handle_get_data(self, request):
 		"""處理前端資料請求: ?2330.TW-2025"""
+		# {{{
 		query = request.query_string
 		try:
 			tid, yid = query.split('-')
@@ -188,39 +199,47 @@ class HubServer:
 			return web.json_response({"status": "Success", "data": data})
 		except Exception as e:
 			return web.json_response({"status": "Error", "message": str(e)}, status=400)
+		# }}}
 
 	async def handle_list_task(self, request):
 		"""處理任務追蹤表的資料列出請求"""
+		# {{{
 		with sqlite3.connect(self.syncer_db) as conn:
 			# 設定 row_factory 以便回傳字典格式
 			conn.row_factory = sqlite3.Row
 			cursor = conn.cursor()
-			cursor.execute("SELECT task_id, symbol, year, begin, status, created_at FROM tasks ORDER BY created_at DESC")
+			cursor.execute("SELECT task_id, symbol, year, tid, status, created_at FROM tasks ORDER BY created_at DESC")
 			rows = cursor.fetchall()
 
 			# 將 sqlite3.Row 轉為 list of dict
 			tasks = [dict(row) for row in rows]
 			return web.json_response({"status": "Success", "tasks": tasks})
+		# }}}
 
 	async def handle_get_task(self, request):
-		"""處理 Worker 任務要求"""
+		"""/api/request 處理 Worker 任務要求"""
+		# {{{
+		TASKS= ["yf","learn3"]
+		type_id = request.query.get("taskType")
 		with sqlite3.connect(self.syncer_db) as conn:
 			cursor = conn.cursor()
-			cursor.execute("SELECT task_id, symbol, year, begin FROM tasks WHERE status='Pending' LIMIT 1")
+			cursor.execute("SELECT task_id, symbol, year FROM tasks WHERE status='Pending' and tid="+type_id+" LIMIT 1")
 			row = cursor.fetchone()
 			if row:
-				task_id, symbol, year, begin = row
-				# cursor.execute("UPDATE tasks SET status='Running' WHERE task_id=?", (task_id,))
+				task_id, symbol, year = row
+				cursor.execute("UPDATE tasks SET status='Running' WHERE task_id=?", (task_id,))
 				conn.commit()
 				return web.json_response({
 					"TaskID": task_id,
-					"Script": "yf",
-					"Args": { "Symbol": symbol, "Year": year, "Begin": begin, "Interval": "1d" }
+					"Script": TASKS[int(type_id)],
+					"Args": { "Symbol": symbol, "Year": year, "Interval": "1d" }
 				})
+		# }}}
 		return web.json_response({})
 
 	async def handle_commit_task(self, request):
-		"""處理 Worker 任務回報"""
+		"""/api/commit 處理 Worker 任務回報"""
+		# {{{
 		task_id = request.query.get("taskID")
 		data = await request.json() # {data} or "FAILED"
 
@@ -229,13 +248,13 @@ class HubServer:
 
 		with sqlite3.connect(self.syncer_db) as conn:
 			cursor = conn.cursor()
-			cursor.execute("SELECT symbol, year FROM tasks WHERE task_id=?", (task_id,))
+			cursor.execute("SELECT symbol, year, tid FROM tasks WHERE task_id=?", (task_id,))
 			task_info = cursor.fetchone()
 			
 			if not task_info:
 				return web.json_response({"status": "Error", "message": "Task not found"}, status=404)
 			
-			symbol, year = task_info
+			symbol, year, task_id = task_info
 
 			if data == "FAILED":
 				cursor.execute("SELECT status FROM tasks WHERE task_id=?", (task_id,))
@@ -247,7 +266,8 @@ class HubServer:
 					conn.commit()
 					return web.json_response({"status": "Retrying"})
 				
-				cursor.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
+				#cursor.execute("DELETE FROM tasks WHERE task_id=?", (task_id,))
+				cursor.execute("UPDATE tasks SET status=? WHERE task_id=?", ("Failed", task_id))
 				conn.commit()
 			else:
 				# 寫入資料到對應的股票 DB
@@ -283,18 +303,17 @@ class HubServer:
 				# 如果是往年資料，立即轉為 JSON
 				if year < datetime.now().year:
 					await self.db2json(db_name, f"{symbol}_{year}.json")
-
+		# }}}
 		return web.json_response({"status": "Acknowledged"})
 
 	def make_app(self):
 		app = web.Application()
-		# 靜態檔案分享 (例如存取 http://localhost:8081/index.html)
-		# 注意：此處 show_index=True 允許列出目錄
-		app.router.add_get('/dapi', self.handle_get_data)
-		app.router.add_post('/api/list', self.handle_list_task)
-		app.router.add_post('/api/request', self.handle_get_task)
-		app.router.add_post('/api/commit', self.handle_commit_task)
-		app.router.add_static('/', self.doc_root, show_index=True)
+		app.router.add_get('/dapi', self.handle_get_data)			# 財金數據快取服務
+		app.router.add_get('/tapi', self.handle_get_toi)			# TOI 管理服務
+		app.router.add_post('/api/list', self.handle_list_task)		# 取得工作列表
+		app.router.add_post('/api/request', self.handle_get_task)	# 取得工作
+		app.router.add_post('/api/commit', self.handle_commit_task)	# 回覆工作結果
+		app.router.add_static('/', self.doc_root, show_index=False)	# 靜態檔案分享 (show_index=True 允許列出目錄)
 		return app
 
 if __name__ == "__main__":

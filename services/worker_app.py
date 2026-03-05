@@ -40,7 +40,10 @@ class WorkerApp:
 		try:
 			while True:
 				try:
-					async with session.post(f"{self.hub_url}/api/request") as resp:
+					async with session.post(
+						f"{self.hub_url}/api/request",
+						params={"taskType": 0} 
+					) as resp:
 						if resp.status != 200:
 							break
 						task = await resp.json()
