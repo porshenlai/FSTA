@@ -220,10 +220,13 @@ class HubServer:
 		"""/api/request 處理 Worker 任務要求"""
 		# {{{
 		TASKS= ["yf","learn3"]
-		type_id = request.query.get("taskType")
+		type_c = request.query.get("taskType") or '0'
+		type_c = type_id.split(",")
+		type_c = " OR ".join([f"tid={v}" for v in type_c])
+
 		with sqlite3.connect(self.syncer_db) as conn:
 			cursor = conn.cursor()
-			cursor.execute("SELECT task_id, symbol, year FROM tasks WHERE status='Pending' and tid="+type_id+" LIMIT 1")
+			cursor.execute("SELECT task_id, symbol, year FROM tasks WHERE status = 'Pending' AND ("+type_c+") LIMIT 1")
 			row = cursor.fetchone()
 			if row:
 				task_id, symbol, year = row

@@ -11,7 +11,8 @@ import aiohttp
 # 3. 執行完畢後透過 POST API 回報結果。
 
 class WorkerApp:
-	def __init__(self, hub_url="http://localhost:8081"):
+	def __init__(self, argv, hub_url="http://localhost:8081"):
+		self.argv = argv
 		self.hub_url = hub_url
 		self.is_processing = False
 		self.session = None
@@ -42,7 +43,7 @@ class WorkerApp:
 				try:
 					async with session.post(
 						f"{self.hub_url}/api/request",
-						params={"taskType": 0} 
+						params={"taskType": self.type} 
 					) as resp:
 						if resp.status != 200:
 							break
@@ -119,6 +120,10 @@ class WorkerApp:
 
 if __name__ == "__main__":
 	try:
-		asyncio.run(WorkerApp().main())
+		argv={"type":"0"};
+		for arg in sys.argv[1:] : 
+			arg=arg.split("=");
+			argv[arg[0]]="=".join(arg[1:])
+		asyncio.run(WorkerApp(argv).main())
 	except KeyboardInterrupt:
 		pass
