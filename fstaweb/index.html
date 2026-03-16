@@ -124,7 +124,6 @@
 			text-decoration: underline;
 			color: #3498db;
 		}
-
 		.nvalue { display:flex;justify-content:space-between; }
 		[TagValue] { border-bottom:1px solid darkblue; display:flex;justify-content:space-between; }
 		[TagValue] button { color:red; }
@@ -167,7 +166,7 @@
 				<span style="color:lightgreen"><input type="checkbox" CID="MACD.12.26.9"/>MACD</span>
 			</div>
 		</div>
-		<div UID="Tags" style='border:1px solid silver;padding:4px;margin:4px 0;'>
+		<div id="TAG" style='border:1px solid silver;padding:4px;margin:4px 0;'>
 			<div><select hnd='file'>
 				<option value='-'>檔案</option>
 				<option value='load'>載入</option>
@@ -177,13 +176,20 @@
 				<option value='R'>紅</option>
 				<option value='G'>綠</option>
 				<option value='B'>藍</option>
-			</select>TOI 標籤管理區</div><hr/>
+			</select><span class="nhover">
+				<span UID="PanelInfo">標籤管理</span>
+				<span UID="StockInfo">尚未載入</span>
+				<style>
+				.nhover:hover [UID="StockInfo"] { display:none; }
+				.nhover:not(:hover) [UID="PanelInfo"] { display:none; }
+				</style>
+			</div><hr/>
 			<div UID="List">
 			</div>
 			<script>
 				// {{{
-				const e = document.currentScript;
-				e.Handler=new (class {
+				const etag=document.currentScript.parentNode;
+				etag.H=new (class {
 					constructor (e) {
 						this.E = e;
 						this.EL = e.querySelector('[UID="List"]');
@@ -210,47 +216,61 @@
 							evt.stopPropagation();
 						});
 					}
-					async flush (sid) {
-						if (this.CT && prompt("Commit tag data ?")) {
-							let pd = this.Lst.reduce((doc,rec) => {
-								if (!(rec.T in doc.TAG)) doc.TAG[rec.T]=[];
-								doc.TAG[rec.T].push(rec.V);
-								return doc;
-							}, {"SID":this.SID,"TAG":{}});
-							const response = await fetch(`http://localhost:8081/tapi?${this.SID}`,pd);
-							const data = await response.json();
-							if (data.status !== "Success" && prompt("Commit failed, continue ?"))
-								return false;
-						}
+					async reset (sid) {
+						if (this.Lst.length>0 && confirm("Commit tag data ?"))
+							await this.commit();
 						if (sid) {
-							this.SID = sid;
+							this.E.querySelector('[UID="StockInfo"]').textContent=sid;
+							this.SID=sid.split(" ")[0];
 							this.Lst = [];
+							while(this.EL.firstChild) this.EL.removeChild(this.EL.firstChild);
 						}
-						return true;
 					}
 					load (e) {
+						const debug_doc={
+							SID:"2303.TW",
+							TAG:{
+								R:["2025-01-01","2025-07-07"],
+								G:["2025-05-05","2025-06-06"]
+							}
+						}
 						console.log("Load", e);
 					}
-					commit (e) {
-						console.log("Commit", e);
+					async commit (e) {
+						let pd = this.Lst.reduce((doc,rec) => {
+							if (!(rec[0] in doc.TAG)) doc.TAG[rec[0]]=[];
+							doc.TAG[rec[0]].push(rec[1]);
+							return doc;
+						}, {"SID":this.SID,"TAG":{}});
+
+						console.log("DEBUG TAG COMMIT",JSON.stringify(pd));
+						const response = await fetch(`http://localhost:8081/tapi?${this.SID}`,pd);
+						const data = await response.json();
+						if (data.status !== "Success" && confirm("Commit failed, continue ?"))
+							throw new Exception("commit failed");
 					}
-					add (e) {
-						const key= document.body.querySelector('[UID="RecordData"] [fn="D"]').textContent;
-						this.Lst=this.Lst.filter((v)=>v!==key);
-						this.Lst.push([e.value,key]);
-						this.Lst=this.Lst.sort();
+					redraw () {
+						const PALETTE={R:"orange",G:"green",B:"blue"};
 						App.Chart.clear('T');
 						this.EL.innerHTML=this.Lst.reduce((r,v)=>{
-							App.Chart.plotTag(Object.keys(App.CVs).indexOf(v[1]));
+							App.Chart.plotTag(Object.keys(App.CVs).indexOf(v[1]),PALETTE[v[0]]);
 							return r+`<div TagType="${v[0]}" TagValue="${v[1]}"><button act="remove">X</button><span>${v[0]+":"+v[1]}</span></div>`
 						}, "");
 					}
-					remove (e) {
-						const key=e.parentNode.getAttribute("TagValue");
-						this.Lst.filter((v)=>v!==key);
-						this.EL.removeChild(e.parentNode);
+					add (e) {
+						const key= document.body.querySelector('[UID="RecordData"] [fn="D"]').textContent;
+						if(!key) return;
+						this.Lst=this.Lst.filter((v)=>(v[0]!==e.value)||(v[1]!==key));
+						this.Lst.push([e.value,key]);
+						this.Lst=this.Lst.sort((a,b)=>a[1]-b[1]);
+						this.redraw();
 					}
-				})(e.parentNode);
+					remove (e) {
+						const key=[e.parentNode.getAttribute("TagType"),e.parentNode.getAttribute("TagValue")];
+						this.Lst=this.Lst.filter((v)=>(v[0]!==key[0])||(v[1]!==key[1]));
+						this.redraw();
+					}
+				})(etag);
 				// }}}
 			</script>
 		</div>
@@ -258,9 +278,39 @@
 	<section UID='View'>
 		<section UID='Chart'>
 			<svg UID='Canvas'></svg>
+			<script>
+				// {{{
+				class StkChart extends window.Chart {
+					printValues (s) {
+						let k=Object.keys(App.CVs),v;
+						k=k[parseInt(k.length*s)];
+						v=Object.assign({"D":k},App.CVs[k]);
+						Array.from(document.body.querySelector('[UID="RecordData"]').querySelectorAll('[fn]'))
+						.forEach((e) => { e.textContent=v[e.getAttribute('fn')]; });
+					}
+					syncAPlots (cks) {
+						if (!App.CVs) return;
+						App.Chart.clear("A");
+						cks.forEach((ck)=>{
+							const args= ck.getAttribute("CID").split('.');
+							const task= App["get"+args[0]];
+							const draw= (("plot"+args[0]) in App.Chart) ? ("plot"+args[0]) : "plotLine" ;
+							args[0]=Object.values(App.CVs).map((row)=>row.C)
+							if (ck.checked)
+								App.Chart[draw](task.apply(App,args),ck.parentNode.style.color);
+						});
+					}
+					plotMACD (d, color)
+					{
+						console.log("MACD data is ",d);
+					}
+				}
+				// }}}
+			</script>
 		</section>
 		<section UID='Table'>
 			<datalist id="StockIDs">
+				<option>2303.TW 聯華電子</option>
 				<option>2330.TW 台積電</option>
 			</datalist>
 			<div style="text-align:center;">
@@ -294,33 +344,6 @@
 <footer>© Cyberpiers/CLUT/Porshen Lai 2026</footer>
 
 <script>
-
-	class StkChart extends window.Chart {
-		printValues (s) {
-			let k=Object.keys(App.CVs),v;
-			k=k[parseInt(k.length*s)];
-			v=Object.assign({"D":k},App.CVs[k]);
-			Array.from(document.body.querySelector('[UID="RecordData"]').querySelectorAll('[fn]'))
-			.forEach((e) => { e.textContent=v[e.getAttribute('fn')]; });
-		}
-		syncAPlots (cks) {
-			if (!App.CVs) return;
-			App.Chart.clear("A");
-			cks.forEach((ck)=>{
-				const args= ck.getAttribute("CID").split('.');
-				const task= App["get"+args[0]];
-				const draw= (("plot"+args[0]) in App.Chart) ? ("plot"+args[0]) : "plotLine" ;
-				args[0]=Object.values(App.CVs).map((row)=>row.C)
-				if (ck.checked)
-					App.Chart[draw](task.apply(App,args),ck.parentNode.style.color);
-			});
-		}
-		plotMACD (d, color)
-		{	// {{{
-			console.log("MACD data is ",d);
-		}	// }}}
-	}
-
 	class StkData extends window.SData {
 		async fetch (sid, year) {
 			sid=sid.trim().replaceAll(/ .*/g,'');
@@ -435,7 +458,18 @@
 			document.querySelector("aside[UID='Control']").innerText = msg;
 		}
 	};
-	Service.initWorker();
+	try {
+		Service.initWorker();
+	} catch(x) {
+		Service.requestData=function(symbol, year){
+			let se=document.createElement("script"),
+				ps=new Promise((or,oe)=>{ se.Return=or; se.Except=oe; });
+			se.addEventListener("load",(evt)=>se.parentNode.removeChild(se));
+			se.src="debug/"+symbol+"-"+year+".js";
+			document.head.appendChild(se);
+			return ps;	
+		}
+	}
 
 	document.body.UM = {
 		manage: function() { console.log("User Management - Manage Clicked"); },
@@ -482,14 +516,15 @@
 									}
 								);
 								e.disabled=false;
-								App.Chart.clear();
-								App.Chart.plotKC(
-									Object.values(result).map((row)=>[row.O,row.C,row.H,row.L]),
-									["#ff4444","#00ff44"]
-								);
-
-								App.Chart.finalized();
-								App.Chart.zoom(document.body.querySelector('[UID="ZoomControl"]').value);
+								document.getElementById("TAG").H.reset(sid).then(()=>{;
+									App.Chart.clear();
+									App.Chart.plotKC(
+										Object.values(result).map((row)=>[row.O,row.C,row.H,row.L]),
+										["#ff4444","#00ff44"]
+									);
+									App.Chart.finalized();
+									App.Chart.zoom(document.body.querySelector('[UID="ZoomControl"]').value);
+								},()=>alert("Cancelled"));
 							}
 						}
 					})(

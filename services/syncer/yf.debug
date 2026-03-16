@@ -1,8 +1,8 @@
 #!/bin/sh
-cat << MSG | python3 yf.py
+cat << MSG | /d/projects/FSTA/services/venv/Scripts/python.exe yf.py
 {
-	"Symbol": "2330.TW",
-	"Year": 2026,
+	"Symbol": "2303.TW",
+	"Year": 2025,
 	"Begin": 0,
 	"Interval": "1d"
 }

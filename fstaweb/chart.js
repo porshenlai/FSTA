@@ -20,14 +20,9 @@ class Chart
 			this.Canvas[id]=canvas;
 		});
 		this.Cursor=document.createElementNS("http://www.w3.org/2000/svg", "rect");
-		this.Cursor.setAttribute("x", 0);
-		this.Cursor.setAttribute("y", 0);
-		this.Cursor.setAttribute("width", 10);
-		this.Cursor.setAttribute("height", 0);
-		this.Cursor.setAttribute("fill", "white");
 		this.Canvas.Z.appendChild(this.Cursor);
 
-		this.allY = []; // 儲存所有 Y 座標以計算邊界
+		this.clear();
 	}	// }}}
 
 	clear (target)
@@ -41,6 +36,14 @@ class Chart
 				this.Canvas.Z.removeChild(this.Canvas.Z.firstChild);
 			this.Canvas.Z.appendChild(this.Cursor);
 		}
+		if (!target) {
+			this.Cursor.setAttribute("x", 0);
+			this.Cursor.setAttribute("y", 0);
+			this.Cursor.setAttribute("width", 10);
+			this.Cursor.setAttribute("height", 0);
+			this.Cursor.setAttribute("fill", "white");
+			this.allY = []; // 儲存所有 Y 座標以計算邊界
+		}
 	}	// }}}
 
 	printValues (v, idx)
@@ -48,8 +51,9 @@ class Chart
 		console.log(JSON.stringify(v));
 	}	// }}}
 
-	plotTag (idx)
+	plotTag (idx, c="silver")
 	{	// {{{
+		console.log("DEBUGGGGGG",idx,c);
 		let tag=document.createElementNS("http://www.w3.org/2000/svg", "line");
 		let y=parseFloat(this.Cursor.getAttribute("y")),
 			h=parseFloat(this.Cursor.getAttribute("height"));
@@ -57,13 +61,15 @@ class Chart
 		tag.setAttribute("x2", idx*10);
 		tag.setAttribute("y1", y);
 		tag.setAttribute("y2", y+h);
-		tag.setAttribute("stroke", "silver");
+		tag.setAttribute("stroke", c);
+		tag.setAttribute("stroke-width", "2");
+		tag.setAttribute("vector-effect", "non-scaling-stroke");
+		console.log(tag);
 		this.Canvas.Z.appendChild(tag);
 	}	// }}}
 
 	plotLine (d=[0], c="#ff0000", w="2")
 	{	// plot line chart {{{
-		console.log(d);
 		this.allY.push(...d);
 		let points = d.map((val, i) => `${i * 10 + 5},${val}`).join(" ");
 		let polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
@@ -71,6 +77,7 @@ class Chart
 		polyline.setAttribute("fill", "none");
 		polyline.setAttribute("stroke", c);
 		polyline.setAttribute("stroke-width", w);
+		polyline.setAttribute("vector-effect", "non-scaling-stroke");
 		this.Canvas.A.appendChild(polyline);
 	}	// }}}
 
@@ -160,7 +167,7 @@ class Chart
 		
 		this.View.setAttribute("viewBox", `0 ${vBoxY} ${widthX} ${vBoxH}`);
 		this.Cursor.setAttribute("y", minY);
-		this.Cursor.setAttribute("height", maxY);
+		this.Cursor.setAttribute("height", maxY-minY);
 		
 		console.log(`Finalized: Width=${widthX}, YRange=[${minY}, ${maxY}]`);
 	}	// }}}
