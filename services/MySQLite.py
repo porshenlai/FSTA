@@ -11,22 +11,31 @@ class DB:
 		if layout :
 			self.commit(f"CREATE TABLE IF NOT EXISTS {layout[0]} ({layout[1]})");
 
-	# cursor.execute("SELECT task_id FROM tasks WHERE symbol=? AND year=? AND tid=?", (symbol, year, tid))
-	def query(self, *args) :
-		self.cursor = None
-		with connect(self.db) as conn:
-			cursor = conn.cursor()
-			cursor.execute(*args);
-		self.cursor = cursor;
-		return self
-
 	# "INSERT INTO tasks (symbol, year, tid, status) VALUES (?, ?, ?, 'Pending')", (symbol, year, tid)
 	def commit(self, *cmds) :
+		""" [SAMPLE]
+	commit("INSERT OR REPLACE INFO 表格 (欄位A,欄位B) VALUES (?,?)",(數值A,數值B))
+	commit("DELETE FROM 表格 WHERE 欄位A=? AND 欄位B=?", (數值A, 數值B))
+		"""
 		if str == type(cmds[0]) : cmds=[cmds]
 		with connect(self.db) as conn:
 			for cmd in cmds :
 				conn.execute(*cmd)
 			conn.commit()
+		return self
+
+	def query(self, *args) :
+		""" [SAMPLE]
+	row = query("SELECT 欄位s FROM 表格 WHERE 欄位A=? AND 欄位B=?", (數值A, 數值B)).FOUND
+	list = query("SELECT 欄位s FROM 表格 WHERE 欄位A=? AND 欄位B=?", (數值A, 數值B)).DICT
+	for row in query("SELECT 欄位s FROM 表格 WHERE 欄位A=? AND 欄位B=?", (數值A, 數值B)).ROWS :
+		...
+		"""
+		self.cursor = None
+		with connect(self.db) as conn:
+			cursor = conn.cursor()
+			cursor.execute(*args);
+		self.cursor = cursor;
 		return self
 
 	@property
