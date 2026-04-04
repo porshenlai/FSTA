@@ -1,13 +1,12 @@
-import asyncio
-import signal
-import os
-import sqlite3
-import json
+from os import path as Path, makedirs, remove, getpid, kill
+from json import loads as jloads, dumps as jdumps
+from signal import SIGUSR1
 from datetime import datetime
+
 #pip install aiohttp aiofiles psutil
 from aiohttp import web
-import aiofiles
-import psutil
+from aiofiles import open as aopen
+from psutil import process_iter, NoSuchProcess, AccessDenied
 
 # 1. 建立一個異步 Web 伺服器運行在 8081 埠。
 # 2. 實作 GET /data?symbol_year 路由處理快取讀取。
@@ -26,53 +25,7 @@ import psutil
 # D 為索引欄 (也是使用該年度第幾天的整數型態即可), X 欄為可變程度字串，
 # 內容為扣除 C O H L V 屬性後剩餘資料的 JSON 表示。
 
-class DB:
-	## {{{
-	def __init__ (self, dbf, layout=None) :
-		self.db = dbf
-		self.db_root = os.path.dirname(dbf)
-		self.cursor = None
-		if not os.path.exists(self.db_root) :
-			os.makedirs(self.db_root)
-		if layout :
-			tbn,layout=layout
-			self.commit(f"CREATE TABLE IF NOT EXISTS {tbn} ({layout})");
-
-	# cursor.execute("SELECT task_id FROM tasks WHERE symbol=? AND year=? AND tid=?", (symbol, year, tid))
-	def query(self, *args) :
-		self.cursor = None
-		with sqlite3.connect(self.db) as conn:
-			cursor = conn.cursor()
-			cursor.execute(*args);
-		self.cursor = cursor;
-		return self
-
-	# "INSERT INTO tasks (symbol, year, tid, status) VALUES (?, ?, ?, 'Pending')", (symbol, year, tid)
-	def commit(self, *cmds) :
-		if str == type(cmds[0]) : cmds=[cmds]
-		with sqlite3.connect(self.db) as conn:
-			for cmd in cmds :
-				conn.execute(*cmd)
-			conn.commit()
-		return self
-
-	@property
-	def FOUND (self) :
-		if not self.cursor : return False
-		row = cursor.fetchone()
-		return None if not row else dict(row)
-
-	@property
-	def ROWS (self) :
-		if not self.cursor : return None
-		return self.cursor.fetchall()
-
-	@property
-	def DICT (self) :
-		if not self.cursor : return None
-		rows = self.cursor.fetchall()
-		return [dict(row) for row in rows] # 將 sqlite3.Row 轉為 list of dict
-	## DB }}}
+from MySQLite import DB
 
 class HubServer(DB):
 	def __init__(self):
@@ -91,8 +44,8 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 """))
 
 		self.doc_root = "docs/"
-		if not os.path.exists(self.doc_root):
-			os.makedirs(self.doc_root)
+		if not Path.exists(self.doc_root):
+			makedirs(self.doc_root)
 
 		# 運行中 syncer 的資料表
 		self.max_retry = 3
@@ -102,7 +55,7 @@ created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		# 初始化 SQLite 資料庫結構 (TOI)
 		# TOI Records       # TID: Target ID    # UID: User ID
 		# DATE: Date of TOI # TAG: Type of TOI
-		self.toi_db=DB(os.path.join(self.db_root,'toi.db'), ("records","""
+		self.toi_db=DB(Path.join(self.db_root,'toi.db'), ("records","""
 RID INTEGER PRIMARY KEY AUTOINCREMENT,
 TID TEXT, UID TEXT,
 DATE TEXT, TAG TEXT
@@ -112,14 +65,14 @@ DATE TEXT, TAG TEXT
 	def get_all_worker_pids(script_name="worker_app.py"):
 		# {{{
 		pids = []
-		for proc in psutil.process_iter(['pid', 'cmdline']):
+		for proc in process_iter(['pid', 'cmdline']):
 			try:
 				# 檢查命令列中是否包含目標腳本名稱
 				cmdline = proc.info.get('cmdline')
 				if cmdline and any(script_name in s for s in cmdline):
-					if proc.info['pid'] != os.getpid(): # 排除 Hub 自身
+					if proc.info['pid'] != getpid(): # 排除 Hub 自身
 						pids.append(proc.info['pid'])
-			except (psutil.NoSuchProcess, psutil.AccessDenied):
+			except (NoSuchProcess, AccessDenied):
 				continue
 		# }}}
 		return pids
@@ -136,7 +89,7 @@ DATE TEXT, TAG TEXT
 	
 		for pid in worker_pids:
 			try:
-				os.kill(pid, signal.SIGUSR1)
+				kill(pid, SIGUSR1)
 			except ProcessLookupError:
 				print(f"PID {pid} 已消失")
 		# }}}
@@ -144,7 +97,7 @@ DATE TEXT, TAG TEXT
 	async def db2json(self, db_name, json_path=None):
 		""" 將 db 儲存的年度資料表格轉換成 JSON 檔案，並回傳 List """
 		# {{{
-		db_path = os.path.join(self.db_root, db_name)
+		db_path = Path.join(self.db_root, db_name)
 		data_list = [None] * 366
 
 		# 取得所有欄位
@@ -152,18 +105,18 @@ DATE TEXT, TAG TEXT
 			d_idx = r[0] # D 是索引 (第幾天)
 			if 0 <= d_idx < 366:
 				# 解析 X (Extra data) JSON 字串並合併
-				extra = json.loads(r[6]) if r[6] else {}
+				extra = jloads(r[6]) if r[6] else {}
 				day_data = { "C": r[1], "O": r[2], "H": r[3], "L": r[4], "V": r[5] }
 				day_data.update(extra)
 				data_list[d_idx] = day_data
 
 		if json_path:
-			full_json_path = os.path.join(self.db_root, json_path)
-			async with aiofiles.open(full_json_path, mode='w') as f:
-				await f.write(json.dumps(data_list))
+			full_json_path = Path.join(self.db_root, json_path)
+			async with aopen(full_json_path, mode='w') as f:
+				await f.write(jdumps(data_list))
 			# 轉換完成後刪除 DB
-			if os.path.exists(db_path):
-				os.remove(db_path)
+			if Path.exists(db_path):
+				remove(db_path)
 
 		# }}}
 		return data_list
@@ -190,15 +143,15 @@ DATE TEXT, TAG TEXT
 		json_file = f"{symbol}_{year}.json"
 		db_file = f"{symbol}_{year}.db"
 
-		json_path = os.path.join(self.db_root, json_file)
-		db_path = os.path.join(self.db_root, db_file)
+		json_path = Path.join(self.db_root, json_file)
+		db_path = Path.join(self.db_root, db_file)
 
 		if year != this_year:
-			if os.path.exists(json_path):
-				async with aiofiles.open(json_path, mode='r') as f:
-					return json.loads(await f.read())
+			if Path.exists(json_path):
+				async with aopen(json_path, mode='r') as f:
+					return jloads(await f.read())
 
-			if os.path.exists(db_path):
+			if Path.exists(db_path):
 				return await self.db2json(db_file, json_file)
 
 			await self.schedule_task(symbol, year, 0)
@@ -206,10 +159,10 @@ DATE TEXT, TAG TEXT
 		else:
 			# 當年度處理
 			max_date = 0
-			if os.path.exists(db_path):
-				max_date = datetime.fromtimestamp(os.path.getmtime(db_path)).timetuple().tm_yday
+			if Path.exists(db_path):
+				max_date = datetime.fromtimestamp(Path.getmtime(db_path)).timetuple().tm_yday
 			today_day_of_year = datetime.now().timetuple().tm_yday
-			if os.path.exists(db_path) and max_date >= today_day_of_year - 1:
+			if Path.exists(db_path) and max_date >= today_day_of_year - 1:
 				return await self.db2json(db_file) # 不轉 json 檔，因為還會更新
 
 			await self.schedule_task(symbol, year, max_date)
@@ -288,7 +241,7 @@ DATE TEXT, TAG TEXT
 		else:
 			# 寫入資料到對應的股票 DB
 			db_name = f"{symbol}_{year}.db"
-			db_path = os.path.join(self.db_root, db_name)
+			db_path = Path.join(self.db_root, db_name)
 			
 			cmds = []
 			count = -1
@@ -304,7 +257,7 @@ DATE TEXT, TAG TEXT
 				item['D'] = count
 				cmds.append((
 					"INSERT OR REPLACE INTO price_data (D, C, O, H, L, V, X) VALUES (?,?,?,?,?,?,?)",
-					(item['D'],item['C'],item['O'],item['H'],item['L'],item['V'],json.dumps(extra_data))
+					(item['D'],item['C'],item['O'],item['H'],item['L'],item['V'],jdumps(extra_data))
 				))
 			
 			DB(db_path, ("price_data","""
@@ -322,7 +275,7 @@ DATE TEXT, TAG TEXT
 		return web.json_response({"status": "Acknowledged"})
 
 	async def handle_get_toi(self, request):
-		"""處理前端資料請求: ?tid=2330.TW&uid=0"""
+		"""處理前端資料請求: GET ?tid=2330.TW&uid=0"""
 		try:
 			tid = request.query_string
 			return web.json_response({
@@ -333,7 +286,7 @@ DATE TEXT, TAG TEXT
 			return web.json_response({"status": "Error", "message": str(e)}, status=400)
 
 	async def handle_commit_toi(self, request):
-		"""/tapi/commit 處理 使用者 TOI 上傳 ?tid=2330.TW&uid=0"""
+		"""/tapi/commit 處理 使用者 TOI 上傳 POST ?tid=2330.TW&uid=0 [{TID,UID,DATE,TAG}]"""
 		tid = request.query.get("tid")
 		uid = request.query.get("uid")
 
