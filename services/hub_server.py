@@ -101,7 +101,7 @@ DATE TEXT, TAG TEXT
 		data_list = [None] * 366
 
 		# 取得所有欄位
-		for r in self.query("SELECT D, C, O, H, L, V, X FROM price_data ORDER BY D ASC").ROWS:
+		for r in DB(db_path).query("SELECT D, C, O, H, L, V, X FROM price_data ORDER BY D ASC").ROWS:
 			d_idx = r[0] # D 是索引 (第幾天)
 			if 0 <= d_idx < 366:
 				# 解析 X (Extra data) JSON 字串並合併
@@ -191,8 +191,8 @@ DATE TEXT, TAG TEXT
 	async def handle_get_task(self, request):
 		"""/api/request 處理 Worker 任務要求"""
 		TASKS = ["yf","learn3"]
-		type_c = request.query.get("taskType") or '0'
-		type_c = type_id.split(",")
+		task_type = request.query.get("taskType") or '0'
+		type_c = task_type.split(",")
 		type_c = " OR ".join([f"tid={v}" for v in type_c])
 
 		row = self.query(
@@ -201,15 +201,14 @@ DATE TEXT, TAG TEXT
 		if None == row :
 			return web.json_response({})
 
-		task_id, symbol, year = row
 		self.commit(
 			"UPDATE tasks SET status='Running' WHERE task_id=?",
-			(task_id,)
+			(row["task_id"],)
 		);
 		return web.json_response({
-			"TaskID": task_id,
-			"Script": TASKS[int(type_id)],
-			"Args": { "Symbol": symbol, "Year": year, "Interval": "1d" }
+			"TaskID": row["task_id"],
+			"Script": TASKS[int(task_type)],
+			"Args": { "Symbol": row["symbol"], "Year": row["year"], "Interval": "1d" }
 		})
 
 	async def handle_commit_task(self, request):
@@ -226,7 +225,7 @@ DATE TEXT, TAG TEXT
 		if not task_info :
 			return web.json_response({"status": "Error", "message": "Task not found"}, status=404)
 
-		symbol, year, task_id = task_info
+		symbol, year, tid = task_info['symbol'], task_info['year'], task_info['tid']
 		if data == "FAILED":
 			status = self.query(
 				"SELECT status FROM tasks WHERE task_id=?",
@@ -265,7 +264,7 @@ DATE TEXT, TAG TEXT
 				C REAL, O REAL,
 				H REAL, L REAL,
 				V INTEGER, X TEXT
-			""")).commit(cmds)
+			""")).commit(*cmds)
 
 			self.commit("DELETE FROM tasks WHERE task_id=?", (task_id,))
 
@@ -299,7 +298,7 @@ DATE TEXT, TAG TEXT
 			dv={"TID":tid, "UID":uid, "DATE":"", "TAG":""}
 			dv.update(row);
 			cmds.append((
-				"INSERT OR REPLACE INTO price_data (TID,UID,DATE,TAG) VALUES (?,?,?,?)",
+				"INSERT OR REPLACE INTO records (TID,UID,DATE,TAG) VALUES (?,?,?,?)",
 				(dv['TID'],dv['UID'],dv['DATE'],dv['TAG'])
 			))
 		self.toi_db.execute(cmds);

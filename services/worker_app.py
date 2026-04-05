@@ -17,6 +17,7 @@ class WorkerApp:
 		self.is_processing = False
 		self.session = None
 		self.timeout = aiohttp.ClientTimeout(total=30)
+		self.type = "0"
 
 	async def _get_session(self):
 		if self.session is None or self.session.closed:
@@ -48,6 +49,7 @@ class WorkerApp:
 						if resp.status != 200:
 							break
 						task = await resp.json()
+						print("DEBUG-TASK",task);
 				except Exception as e:
 					print(f"[Network Error] 無法連線至 Hub: {e}")
 					break
@@ -79,6 +81,7 @@ class WorkerApp:
 					output = stdout.decode().strip() or stderr.decode().strip()
 					if output != "FAILED" :
 						output = json.loads(output)
+					print("DEBUG",output);
 					returncode = process.returncode
 
 				# 3. 回報結果 (增加簡單的失敗重試)

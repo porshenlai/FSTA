@@ -1,4 +1,4 @@
-from sqlite3 import connect
+from sqlite3 import connect, Row
 from os import path as Path, makedirs
 
 class DB:
@@ -17,9 +17,11 @@ class DB:
 	commit("INSERT OR REPLACE INFO 表格 (欄位A,欄位B) VALUES (?,?)",(數值A,數值B))
 	commit("DELETE FROM 表格 WHERE 欄位A=? AND 欄位B=?", (數值A, 數值B))
 		"""
+		print("TYPE is ",type(cmds[0]),cmds);
 		if str == type(cmds[0]) : cmds=[cmds]
 		with connect(self.db) as conn:
 			for cmd in cmds :
+				print("CMD is ",type(cmd),cmd);
 				conn.execute(*cmd)
 			conn.commit()
 		return self
@@ -33,15 +35,15 @@ class DB:
 		"""
 		self.cursor = None
 		with connect(self.db) as conn:
-			cursor = conn.cursor()
-			cursor.execute(*args);
-		self.cursor = cursor;
+			conn.row_factory = Row
+			self.cursor = conn.cursor()
+			self.cursor.execute(*args);
 		return self
 
 	@property
 	def FOUND (self) :
 		if not self.cursor : return False
-		row = cursor.fetchone()
+		row = self.cursor.fetchone()
 		return None if not row else dict(row)
 
 	@property
