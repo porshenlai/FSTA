@@ -271,15 +271,16 @@ DATE TEXT, TAG TEXT
 			# 如果是往年資料，立即轉為 JSON
 			if year < datetime.now().year:
 				await self.db2json(db_name, f"{symbol}_{year}.json")
-		return web.json_response({"status": "Acknowledged"})
+		return web.json_response({"status": "Success"})
 
 	async def handle_get_toi(self, request):
 		"""處理前端資料請求: GET ?tid=2330.TW&uid=0"""
 		try:
-			tid = request.query_string
+			tid = request.query.get("tid")
+			uid = request.query.get("uid")
 			return web.json_response({
 				"status": "Success",
-				"data": self.toi_db.query("SELECT * FROM records WHERE TID=?", (tid,)).DICT
+				"data": self.toi_db.query("SELECT * FROM records WHERE TID=? AND UID=?", (tid,uid)).DICT
 			})
 		except Exception as e:
 			return web.json_response({"status": "Error", "message": str(e)}, status=400)
@@ -301,8 +302,8 @@ DATE TEXT, TAG TEXT
 				"INSERT OR REPLACE INTO records (TID,UID,DATE,TAG) VALUES (?,?,?,?)",
 				(dv['TID'],dv['UID'],dv['DATE'],dv['TAG'])
 			))
-		self.toi_db.execute(cmds);
-		return web.json_response({"status": "Acknowledged"})
+		self.toi_db.commit(*cmds);
+		return web.json_response({"status": "Success"})
 
 	def make_app(self):
 		app = web.Application()

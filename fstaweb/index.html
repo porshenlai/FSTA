@@ -226,25 +226,16 @@
 							while(this.EL.firstChild) this.EL.removeChild(this.EL.firstChild);
 						}
 					}
-					load (e) {
-						const debug_doc={
-							SID:"2303.TW",
-							TAG:{
-								R:["2025-01-01","2025-07-07"],
-								G:["2025-05-05","2025-06-06"]
-							}
-						}
-						console.log("Load", e);
+					async load (e) {
+						const response = await fetch(`http://localhost:8081/tapi?tid=${this.SID}&uid=0`);
+						const doc = await response.json();
+						if (doc.status==='Success')
+							for (let row of doc.data)
+								this.add(row.TAG, row.DATE)
 					}
 					async commit (e) {
-						let pd = this.Lst.reduce((doc,rec) => {
-							if (!(rec[0] in doc.TAG)) doc.TAG[rec[0]]=[];
-							doc.TAG[rec[0]].push(rec[1]);
-							return doc;
-						}, {"SID":this.SID,"TAG":{}});
-
-						console.log("DEBUG TAG COMMIT",JSON.stringify(pd));
-						const response = await fetch(`http://localhost:8081/tapi?${this.SID}`,pd);
+						let pd = this.Lst.map((rec)=>({DATE:rec[1], TAG:rec[0]}));
+						const response = await fetch(`http://localhost:8081/tapi/commit?tid=${this.SID}&uid=0`,{"method":"post","body":JSON.stringify(pd)});
 						const data = await response.json();
 						if (data.status !== "Success" && confirm("Commit failed, continue ?"))
 							throw new Exception("commit failed");
@@ -257,11 +248,13 @@
 							return r+`<div TagType="${v[0]}" TagValue="${v[1]}"><button act="remove">X</button><span>${v[0]+":"+v[1]}</span></div>`
 						}, "");
 					}
-					add (e) {
-						const key= document.body.querySelector('[UID="RecordData"] [fn="D"]').textContent;
-						if(!key) return;
-						this.Lst=this.Lst.filter((v)=>(v[0]!==e.value)||(v[1]!==key));
-						this.Lst.push([e.value,key]);
+					add (tag, date) {
+						if (tag.value) tag=tag.value;
+						if (!date) date=document.body.querySelector('[UID="RecordData"] [fn="D"]').textContent;
+						if (!date) return;
+
+						this.Lst=this.Lst.filter((v)=>(v[0]!==tag)||(v[1]!==date));
+						this.Lst.push([tag,date]);
 						this.Lst=this.Lst.sort((a,b)=>a[1]-b[1]);
 						this.redraw();
 					}
